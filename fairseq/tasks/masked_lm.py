@@ -6,12 +6,10 @@
 import os
 
 import numpy as np
-import torch
 
 from fairseq.data import (
     data_utils,
     Dictionary,
-    encoders,
     IdDataset,
     MaskTokensDataset,
     NestedDictionaryDataset,
@@ -23,6 +21,7 @@ from fairseq.data import (
     TokenBlockDataset,
 )
 from fairseq.tasks import FairseqTask, register_task
+from fairseq.data.encoders.utils import get_whole_word_mask
 
 
 @register_task('masked_lm')
@@ -50,7 +49,7 @@ class MaskedLMTask(FairseqTask):
                             help='probability that a masked token is unmasked')
         parser.add_argument('--random-token-prob', default=0.1, type=float,
                             help='probability of replacing a token with a random token')
-        parser.add_argument('--freq-weighted-replacement', action='store_true',
+        parser.add_argument('--freq-weighted-replacement', default=False, action='store_true',
                             help='sample random replacement words based on word frequencies')
         parser.add_argument('--mask-whole-words', default=False, action='store_true',
                             help='mask whole words; you may also want to set --bpe')
@@ -65,7 +64,7 @@ class MaskedLMTask(FairseqTask):
 
     @classmethod
     def setup_task(cls, args, **kwargs):
-        paths = args.data.split(':')
+        paths = args.data.split(os.pathsep)
         assert len(paths) > 0
         dictionary = Dictionary.load(os.path.join(paths[0], 'dict.txt'))
         print('| dictionary: {} types'.format(len(dictionary)))
@@ -77,7 +76,7 @@ class MaskedLMTask(FairseqTask):
         Args:
             split (str): name of the split (e.g., train, valid, test)
         """
-        paths = self.args.data.split(':')
+        paths = self.args.data.split(os.pathsep)
         assert len(paths) > 0
         data_path = paths[epoch % len(paths)]
         split_path = os.path.join(data_path, split)
@@ -106,27 +105,8 @@ class MaskedLMTask(FairseqTask):
         dataset = PrependTokenDataset(dataset, self.source_dictionary.bos())
 
         # create masked input and targets
-        if self.args.mask_whole_words:
-            bpe = encoders.build_bpe(self.args)
-            assert bpe is not None
-
-            def is_beginning_of_word(i):
-                if i < self.source_dictionary.nspecial:
-                    # special elements are always considered beginnings
-                    return True
-                tok = self.source_dictionary[i]
-                if tok.startswith('madeupword'):
-                    return True
-                try:
-                    return bpe.is_beginning_of_word(tok)
-                except ValueError:
-                    return True
-
-            mask_whole_words = torch.ByteTensor(list(
-                map(is_beginning_of_word, range(len(self.source_dictionary)))
-            ))
-        else:
-            mask_whole_words = None
+        mask_whole_words = get_whole_word_mask(self.args, self.source_dictionary) \
+            if self.args.mask_whole_words else None
 
         src_dataset, tgt_dataset = MaskTokensDataset.apply_mask(
             dataset,

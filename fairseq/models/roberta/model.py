@@ -199,8 +199,31 @@ class XLMRModel(RobertaModel):
     @classmethod
     def hub_models(cls):
         return {
-            'xlmr.base.v0': 'http://dl.fbaipublicfiles.com/fairseq/models/xlmr.base.v0.tar.gz',
-            'xlmr.large.v0': 'http://dl.fbaipublicfiles.com/fairseq/models/xlmr.large.v0.tar.gz',
+            'xlmr.base': 'http://dl.fbaipublicfiles.com/fairseq/models/xlmr.base.tar.gz',
+            'xlmr.large': 'http://dl.fbaipublicfiles.com/fairseq/models/xlmr.large.tar.gz',
+        }
+
+    @classmethod
+    def from_pretrained(cls, model_name_or_path, checkpoint_file='model.pt', data_name_or_path='.', bpe='sentencepiece', **kwargs):
+        from fairseq import hub_utils
+        x = hub_utils.from_pretrained(
+            model_name_or_path,
+            checkpoint_file,
+            data_name_or_path,
+            archive_map=cls.hub_models(),
+            bpe=bpe,
+            load_checkpoint_heads=True,
+            **kwargs,
+        )
+        return RobertaHubInterface(x['args'], x['task'], x['models'][0])
+
+
+@register_model('camembert')
+class CamembertModel(RobertaModel):
+    @classmethod
+    def hub_models(cls):
+        return {
+            'camembert.v0': 'http://dl.fbaipublicfiles.com/fairseq/models/camembert.v0.tar.gz',
         }
 
     @classmethod
@@ -323,9 +346,10 @@ class RobertaEncoder(FairseqDecoder):
             tuple:
                 - the LM output of shape `(batch, src_len, vocab)`
                 - a dictionary of additional data, where 'inner_states'
-                  is a list of hidden states.
+                  is a list of hidden states. Note that the hidden
+                  states have shape `(src_len, batch, vocab)`.
         """
-        x, extra = self.extract_features(src_tokens, return_all_hiddens)
+        x, extra = self.extract_features(src_tokens, return_all_hiddens=return_all_hiddens)
         if not features_only:
             x = self.output_layer(x, masked_tokens=masked_tokens)
         return x, extra
@@ -335,7 +359,7 @@ class RobertaEncoder(FairseqDecoder):
             src_tokens,
             last_state_only=not return_all_hiddens,
         )
-        features = inner_states[-1]
+        features = inner_states[-1].transpose(0, 1)  # T x B x C -> B x T x C
         return features, {'inner_states': inner_states if return_all_hiddens else None}
 
     def output_layer(self, features, masked_tokens=None, **unused):
@@ -360,6 +384,8 @@ def base_architecture(args):
     args.attention_dropout = getattr(args, 'attention_dropout', 0.1)
     args.activation_dropout = getattr(args, 'activation_dropout', 0.0)
     args.pooler_dropout = getattr(args, 'pooler_dropout', 0.0)
+    args.encoder_layers_to_keep = getattr(args, 'encoder_layers_to_keep', None)
+    args.encoder_layerdrop = getattr(args, 'encoder_layerdrop', 0.0)
 
 
 @register_model_architecture('roberta', 'roberta_base')

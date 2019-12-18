@@ -71,10 +71,6 @@ class MultilingualTranslationTask(FairseqTask):
                             help='source language (only needed for inference)')
         parser.add_argument('-t', '--target-lang', default=None, metavar='TARGET',
                             help='target language (only needed for inference)')
-        parser.add_argument('--lazy-load', action='store_true',
-                            help='load the dataset lazily')
-        parser.add_argument('--raw-text', default=False, action='store_true',
-                            help='load raw text dataset')
         parser.add_argument('--left-pad-source', default='True', type=str, metavar='BOOL',
                             help='pad the source on the left (default: True)')
         parser.add_argument('--left-pad-target', default='False', type=str, metavar='BOOL',
@@ -123,12 +119,6 @@ class MultilingualTranslationTask(FairseqTask):
     def prepare(cls, args, **kargs):
         args.left_pad_source = options.eval_bool(args.left_pad_source)
         args.left_pad_target = options.eval_bool(args.left_pad_target)
-        if getattr(args, 'raw_text', False):
-            utils.deprecation_warning('--raw-text is deprecated, please use --dataset-impl=raw')
-            args.dataset_impl = 'raw'
-        elif getattr(args, 'lazy_load', False):
-            utils.deprecation_warning('--lazy-load is deprecated, please use --dataset-impl=lazy')
-            args.dataset_impl = 'lazy'
 
         if args.lang_pairs is None:
             raise ValueError('--lang-pairs is required. List all the language pairs in the training objective.')
@@ -142,7 +132,7 @@ class MultilingualTranslationTask(FairseqTask):
         # load dictionaries
         dicts = OrderedDict()
         for lang in sorted_langs:
-            paths = args.data.split(':')
+            paths = args.data.split(os.pathsep)
             assert len(paths) > 0
             dicts[lang] = Dictionary.load(os.path.join(paths[0], 'dict.{}.txt'.format(lang)))
             if len(dicts) > 0:
@@ -197,7 +187,7 @@ class MultilingualTranslationTask(FairseqTask):
     def load_dataset(self, split, epoch=0, **kwargs):
         """Load a dataset split."""
 
-        paths = self.args.data.split(':')
+        paths = self.args.data.split(os.pathsep)
         assert len(paths) > 0
         data_path = paths[epoch % len(paths)]
 

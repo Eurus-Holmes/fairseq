@@ -63,10 +63,6 @@ class LanguageModelingTask(FairseqTask):
                                  'If set to "eos", includes only one sentence per sample.')
         parser.add_argument('--tokens-per-sample', default=1024, type=int,
                             help='max number of tokens per sample for LM dataset')
-        parser.add_argument('--lazy-load', action='store_true',
-                            help='load the dataset lazily')
-        parser.add_argument('--raw-text', default=False, action='store_true',
-                            help='load raw text dataset')
         parser.add_argument('--output-dictionary-size', default=-1, type=int,
                             help='limit the size of output dictionary')
         parser.add_argument('--self-target', action='store_true',
@@ -97,17 +93,6 @@ class LanguageModelingTask(FairseqTask):
         Args:
             args (argparse.Namespace): parsed command-line arguments
         """
-        if getattr(args, "raw_text", False):
-            utils.deprecation_warning(
-                "--raw-text is deprecated, please use --dataset-impl=raw"
-            )
-            args.dataset_impl = "raw"
-        elif getattr(args, "lazy_load", False):
-            utils.deprecation_warning(
-                "--lazy-load is deprecated, please use --dataset-impl=lazy"
-            )
-            args.dataset_impl = "lazy"
-
         dictionary = None
         output_dictionary = None
         if args.data:
@@ -212,7 +197,7 @@ class LanguageModelingTask(FairseqTask):
                 self.target_dictionary,
                 add_eos_for_other_targets=False,
                 shuffle=False,
-                add_bos_token=self.args.add_bos_token,
+                add_bos_token=False,  # we handle this in inference_step
             ),
             eos=self.source_dictionary.eos(),
             # remove EOS since this will be used as a prefix for generation
@@ -223,9 +208,16 @@ class LanguageModelingTask(FairseqTask):
     def inference_step(self, generator, models, sample, prefix_tokens=None):
         with torch.no_grad():
             if prefix_tokens is None and sample["net_input"]["src_tokens"].nelement():
-                # note: EOS has already been removed in build_dataset_for_inference
                 prefix_tokens = sample["net_input"]["src_tokens"]
-            return generator.generate(models, sample, prefix_tokens=prefix_tokens)
+                if prefix_tokens[:, 0].eq(self.source_dictionary.eos()).all():
+                    prefix_tokens = prefix_tokens[:, 1:]
+            if getattr(self.args, 'add_bos_token', False):
+                bos_token = self.source_dictionary.bos()
+            else:
+                bos_token = None
+            return generator.generate(
+                models, sample, prefix_tokens=prefix_tokens, bos_token=bos_token,
+            )
 
     @property
     def source_dictionary(self):

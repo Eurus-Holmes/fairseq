@@ -26,12 +26,20 @@ class TransformerLanguageModel(FairseqLanguageModel):
 
     @classmethod
     def hub_models(cls):
+
+        def moses_fastbpe(path):
+            return {
+                'path': path,
+                'tokenizer': 'moses',
+                'bpe': 'fastbpe',
+            }
+
         return {
             'transformer_lm.gbw.adaptive_huge': 'https://dl.fbaipublicfiles.com/fairseq/models/lm/adaptive_lm_gbw_huge.tar.bz2',
             'transformer_lm.wiki103.adaptive': 'https://dl.fbaipublicfiles.com/fairseq/models/lm/adaptive_lm_wiki103.tar.bz2',
-            'transformer_lm.wmt19.en': 'https://dl.fbaipublicfiles.com/fairseq/models/lm/wmt19.en.tar.bz2',
-            'transformer_lm.wmt19.de': 'https://dl.fbaipublicfiles.com/fairseq/models/lm/wmt19.de.tar.bz2',
-            'transformer_lm.wmt19.ru': 'https://dl.fbaipublicfiles.com/fairseq/models/lm/wmt19.ru.tar.bz2',
+            'transformer_lm.wmt19.en': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/lm/wmt19.en.tar.bz2'),
+            'transformer_lm.wmt19.de': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/lm/wmt19.de.tar.bz2'),
+            'transformer_lm.wmt19.ru': moses_fastbpe('https://dl.fbaipublicfiles.com/fairseq/models/lm/wmt19.ru.tar.bz2'),
         }
 
     def __init__(self, decoder):
@@ -103,6 +111,10 @@ class TransformerLanguageModel(FairseqLanguageModel):
                             help='LayerDrop probability for decoder')
         parser.add_argument('--decoder-layers-to-keep', default=None,
                             help='which layers to *keep* when pruning as a comma-separated list')
+        parser.add_argument('--layernorm-embedding', action='store_true',
+                            help='add layernorm to embedding')
+        parser.add_argument('--no-scale-embedding', action='store_true',
+                            help='if True, dont scale embeddings')
         # fmt: on
 
     @classmethod
@@ -189,6 +201,9 @@ def base_lm_architecture(args):
 
     args.tie_adaptive_weights = getattr(args, 'tie_adaptive_weights', False)
     args.tie_adaptive_proj = getattr(args, 'tie_adaptive_proj', False)
+
+    args.no_scale_embedding = getattr(args, 'no_scale_embedding', False)
+    args.layernorm_embedding = getattr(args, 'layernorm_embedding', False)
 
 
 @register_model_architecture('transformer_lm', 'transformer_lm_big')

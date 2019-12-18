@@ -9,8 +9,8 @@ from setuptools import setup, find_packages, Extension
 import sys
 
 
-if sys.version_info < (3, 5):
-    sys.exit('Sorry, Python >=3.5 is required for fairseq.')
+if sys.version_info < (3, 6):
+    sys.exit('Sorry, Python >= 3.6 is required for fairseq.')
 
 
 with open('README.md') as f:
@@ -97,15 +97,31 @@ else:
     dependency_links = []
 
 
+if 'clean' in sys.argv[1:]:
+    # Source: https://bit.ly/2NLVsgE
+    print("deleting Cython files...")
+    import subprocess
+    subprocess.run(['rm -f fairseq/*.so fairseq/**/*.so'], shell=True)
+
+
+if 'test' in sys.argv[1:]:
+    try:
+        import fairseq.data.token_block_utils_fast
+    except (ImportError, ModuleNotFoundError):
+        raise Exception(
+            'Please install Cython components with `python setup.py build_ext --inplace`'
+            'before running unit tests.'
+        )
+
+
 setup(
     name='fairseq',
-    version='0.8.0',
+    version='0.9.0',
     description='Facebook AI Research Sequence-to-Sequence Toolkit',
     url='https://github.com/pytorch/fairseq',
     classifiers=[
         'Intended Audience :: Science/Research',
         'License :: OSI Approved :: MIT License',
-        'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
         'Topic :: Scientific/Engineering :: Artificial Intelligence',
     ],

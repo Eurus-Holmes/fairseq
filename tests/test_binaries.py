@@ -41,6 +41,7 @@ class TestTranslation(unittest.TestCase):
                 train_translation_model(data_dir, 'fconv_iwslt_de_en', ['--dataset-impl', 'raw'])
                 generate_main(data_dir, ['--dataset-impl', 'raw'])
 
+    @unittest.skipIf(not torch.cuda.is_available(), 'test requires a GPU')
     def test_fp16(self):
         with contextlib.redirect_stdout(StringIO()):
             with tempfile.TemporaryDirectory('test_fp16') as data_dir:
@@ -49,6 +50,7 @@ class TestTranslation(unittest.TestCase):
                 train_translation_model(data_dir, 'fconv_iwslt_de_en', ['--fp16'])
                 generate_main(data_dir)
 
+    @unittest.skipIf(not torch.cuda.is_available(), 'test requires a GPU')
     def test_memory_efficient_fp16(self):
         with contextlib.redirect_stdout(StringIO()):
             with tempfile.TemporaryDirectory('test_memory_efficient_fp16') as data_dir:
@@ -197,51 +199,110 @@ class TestTranslation(unittest.TestCase):
                 ])
                 generate_main(data_dir)
 
+    def test_cmlm_transformer(self):
+        with contextlib.redirect_stdout(StringIO()):
+            with tempfile.TemporaryDirectory('test_cmlm_transformer') as data_dir:
+                create_dummy_data(data_dir)
+                preprocess_translation_data(data_dir, ['--joined-dictionary'])
+                train_translation_model(data_dir, 'cmlm_transformer', [
+                    '--apply-bert-init',
+                    '--criterion', 'nat_loss',
+                    '--noise', 'full_mask',
+                    '--pred-length-offset',
+                    '--length-loss-factor', '0.1'
+                ], task='translation_lev')
+                generate_main(data_dir, [
+                    '--task', 'translation_lev',
+                    '--iter-decode-max-iter', '9',
+                    '--iter-decode-eos-penalty', '0',
+                    '--print-step',
+                ])
+
     def test_levenshtein_transformer(self):
         with contextlib.redirect_stdout(StringIO()):
             with tempfile.TemporaryDirectory('test_levenshtein_transformer') as data_dir:
                 create_dummy_data(data_dir)
-                preprocess_translation_data(data_dir)
+                preprocess_translation_data(data_dir, ['--joined-dictionary'])
                 train_translation_model(data_dir, 'levenshtein_transformer', [
                     '--apply-bert-init', '--early-exit', '6,6,6',
                     '--criterion', 'nat_loss'
                 ], task='translation_lev')
-                generate_main(data_dir)
+                generate_main(data_dir, [
+                    '--task', 'translation_lev',
+                    '--iter-decode-max-iter', '9',
+                    '--iter-decode-eos-penalty', '0',
+                    '--print-step',
+                ])
 
     def test_nonautoregressive_transformer(self):
         with contextlib.redirect_stdout(StringIO()):
             with tempfile.TemporaryDirectory('test_nonautoregressive_transformer') as data_dir:
                 create_dummy_data(data_dir)
-                preprocess_translation_data(data_dir)
+                preprocess_translation_data(data_dir, ['--joined-dictionary'])
                 train_translation_model(data_dir, 'nonautoregressive_transformer', [
                     '--apply-bert-init', '--src-embedding-copy', '--criterion',
                     'nat_loss', '--noise', 'full_mask', '--pred-length-offset',
                     '--length-loss-factor', '0.1'
                 ], task='translation_lev')
-                generate_main(data_dir)
+                generate_main(data_dir, [
+                    '--task', 'translation_lev',
+                    '--iter-decode-max-iter', '0',
+                    '--iter-decode-eos-penalty', '0',
+                    '--print-step',
+                ])
+
+    # def test_nat_crf_transformer(self):
+    #     with contextlib.redirect_stdout(StringIO()):
+    #         with tempfile.TemporaryDirectory('test_nat_crf_transformer') as data_dir:
+    #             create_dummy_data(data_dir)
+    #             preprocess_translation_data(data_dir, ['--joined-dictionary'])
+    #             train_translation_model(data_dir, 'nacrf_transformer', [
+    #                 '--apply-bert-init', '--criterion',
+    #                 'nat_loss', '--noise', 'full_mask', '--pred-length-offset',
+    #                 '--length-loss-factor', '0.1',
+    #                 '--word-ins-loss-factor', '0.5',
+    #                 '--crf-lowrank-approx', '1',
+    #                 '--crf-beam-approx', '1'
+    #             ], task='translation_lev')
+    #             generate_main(data_dir, [
+    #                 '--task', 'translation_lev',
+    #                 '--iter-decode-max-iter', '0',
+    #                 '--iter-decode-eos-penalty', '0',
+    #                 '--print-step',
+    #             ])
 
     def test_iterative_nonautoregressive_transformer(self):
         with contextlib.redirect_stdout(StringIO()):
             with tempfile.TemporaryDirectory('test_iterative_nonautoregressive_transformer') as data_dir:
                 create_dummy_data(data_dir)
-                preprocess_translation_data(data_dir)
+                preprocess_translation_data(data_dir, ['--joined-dictionary'])
                 train_translation_model(data_dir, 'iterative_nonautoregressive_transformer', [
                     '--apply-bert-init', '--src-embedding-copy', '--criterion',
                     'nat_loss', '--noise', 'full_mask', '--stochastic-approx',
                     '--dae-ratio', '0.5', '--train-step', '3'
                 ], task='translation_lev')
-                generate_main(data_dir)
+                generate_main(data_dir, [
+                    '--task', 'translation_lev',
+                    '--iter-decode-max-iter', '9',
+                    '--iter-decode-eos-penalty', '0',
+                    '--print-step',
+                ])
 
     def test_insertion_transformer(self):
         with contextlib.redirect_stdout(StringIO()):
             with tempfile.TemporaryDirectory('test_insertion_transformer') as data_dir:
                 create_dummy_data(data_dir)
-                preprocess_translation_data(data_dir)
+                preprocess_translation_data(data_dir, ['--joined-dictionary'])
                 train_translation_model(data_dir, 'insertion_transformer', [
                     '--apply-bert-init', '--criterion', 'nat_loss', '--noise',
                     'random_mask'
                 ], task='translation_lev')
-                generate_main(data_dir)
+                generate_main(data_dir, [
+                    '--task', 'translation_lev',
+                    '--iter-decode-max-iter', '9',
+                    '--iter-decode-eos-penalty', '0',
+                    '--print-step',
+                ])
 
     def test_mixture_of_experts(self):
         with contextlib.redirect_stdout(StringIO()):
@@ -345,6 +406,26 @@ class TestLanguageModeling(unittest.TestCase):
                     data_dir, 'transformer_lm', ['--add-bos-token'], run_validation=True,
                 )
                 eval_lm_main(data_dir)
+                generate_main(data_dir, [
+                    '--task', 'language_modeling',
+                    '--sample-break-mode', 'eos',
+                    '--tokens-per-sample', '500',
+                ])
+
+    def test_lightconv_lm(self):
+        with contextlib.redirect_stdout(StringIO()):
+            with tempfile.TemporaryDirectory('test_lightconv_lm') as data_dir:
+                create_dummy_data(data_dir)
+                preprocess_lm_data(data_dir)
+                train_language_model(
+                    data_dir, 'lightconv_lm', ['--add-bos-token'], run_validation=True,
+                )
+                eval_lm_main(data_dir)
+                generate_main(data_dir, [
+                    '--task', 'language_modeling',
+                    '--sample-break-mode', 'eos',
+                    '--tokens-per-sample', '500',
+                ])
 
 
 class TestMaskedLanguageModel(unittest.TestCase):
@@ -505,7 +586,7 @@ class TestCommonOptions(unittest.TestCase):
                     generate_main(data_dir)
 
 
-def create_dummy_data(data_dir, num_examples=1000, maxlen=20, alignment=False):
+def create_dummy_data(data_dir, num_examples=100, maxlen=20, alignment=False):
 
     def _create_dummy_data(filename):
         data = torch.rand(num_examples * maxlen)
@@ -577,6 +658,7 @@ def train_translation_model(data_dir, arch, extra_flags=None, task='translation'
             '--distributed-world-size', '1',
             '--source-lang', 'in',
             '--target-lang', 'out',
+            '--num-workers', 0,
         ] + (extra_flags or []),
     )
     train.main(train_args)
