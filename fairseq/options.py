@@ -179,6 +179,8 @@ def get_parser(desc, default_task='translation'):
     parser.add_argument('--fp16', action='store_true', help='use FP16')
     parser.add_argument('--memory-efficient-fp16', action='store_true',
                         help='use a memory-efficient version of FP16 training; implies --fp16')
+    parser.add_argument('--fp16-no-flatten-grads', action='store_true',
+                        help='don\'t flatten FP16 grads tensor')
     parser.add_argument('--fp16-init-scale', default=2 ** 7, type=int,
                         help='default FP16 loss scale')
     parser.add_argument('--fp16-scale-window', type=int,
@@ -277,11 +279,10 @@ def add_dataset_args(parser, train=False, gen=False):
                         help='output dataset implementation')
     if train:
         group.add_argument('--train-subset', default='train', metavar='SPLIT',
-                           choices=['train', 'valid', 'test'],
-                           help='data subset to use for training (train, valid, test)')
+                           help='data subset to use for training (e.g. train, valid, test)')
         group.add_argument('--valid-subset', default='valid', metavar='SPLIT',
                            help='comma separated list of data subsets to use for validation'
-                                ' (train, valid, valid1, test, test1)')
+                                ' (e.g. train, valid, test)')
         group.add_argument('--validate-interval', type=int, default=1, metavar='N',
                            help='validate every N epochs')
         group.add_argument('--fixed-validation-seed', default=None, type=int, metavar='N',
@@ -326,6 +327,11 @@ def add_distributed_training_args(parser):
                        help='which GPU to use (usually configured automatically)')
     group.add_argument('--distributed-no-spawn', action='store_true',
                        help='do not spawn multiple processes even if multiple GPUs are visible')
+    # "c10d" is PyTorch's DDP implementation and provides the fastest
+    # training. "no_c10d" is a more robust, but slightly slower DDP
+    # implementation. Try this if you get warning messages about
+    # inconsistent gradients between workers, or if some of your model
+    # parameters are not always used.
     group.add_argument('--ddp-backend', default='c10d', type=str,
                        choices=['c10d', 'no_c10d'],
                        help='DistributedDataParallel backend')
@@ -339,8 +345,7 @@ def add_distributed_training_args(parser):
                        help='disable unused parameter detection (not applicable to '
                        'no_c10d ddp-backend')
     group.add_argument('--fast-stat-sync', default=False, action='store_true',
-                        help='Enable fast sync of stats between nodes, this hardcodes to '
-                        'sync only some default stats from logging_output.')
+                       help='[deprecated] this is now defined per Criterion')
     # fmt: on
     return group
 
@@ -501,6 +506,8 @@ def add_generation_args(parser):
                        help='number of groups for Diverse Beam Search')
     group.add_argument('--diverse-beam-strength', default=0.5, type=float, metavar='N',
                        help='strength of diversity penalty for Diverse Beam Search')
+    group.add_argument('--diversity-rate', default=-1.0, type=float, metavar='N',
+                       help='strength of diversity penalty for Diverse Siblings Search')
     group.add_argument('--print-alignment', action='store_true',
                        help='if set, uses attention feedback to compute and print alignment to source tokens')
     group.add_argument('--print-step', action='store_true')

@@ -7,11 +7,14 @@
 
 import torch
 
-from fairseq import checkpoint_utils, options, progress_bar, utils
+from fairseq import checkpoint_utils, metrics, options, progress_bar, utils
 
 
 def main(args, override_args=None):
     utils.import_user_module(args)
+
+    assert args.max_tokens is not None or args.max_sentences is not None, \
+        'Must specify batch size either with --max-tokens or --max-sentences'
 
     use_fp16 = args.fp16
     use_cuda = torch.cuda.is_available() and not args.cpu
@@ -79,7 +82,9 @@ def main(args, override_args=None):
             progress.log(log_output, step=i)
             log_outputs.append(log_output)
 
-        log_output = task.aggregate_logging_outputs(log_outputs, criterion)
+        with metrics.aggregate() as agg:
+            task.reduce_metrics(log_outputs, criterion)
+            log_output = agg.get_smoothed_values()
 
         progress.print(log_output, tag=subset, step=i)
 
