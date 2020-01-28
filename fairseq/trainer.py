@@ -9,6 +9,7 @@ Train a network across multiple GPUs.
 
 import contextlib
 from itertools import chain
+import logging
 import math
 import os
 import sys
@@ -20,6 +21,9 @@ from fairseq import checkpoint_utils, distributed_utils, metrics, models, optim,
 from fairseq.file_io import PathManager
 from fairseq.meters import AverageMeter, StopwatchMeter, TimeMeter
 from fairseq.optim import lr_scheduler
+
+
+logger = logging.getLogger(__name__)
 
 
 class Trainer(object):
@@ -113,8 +117,8 @@ class Trainer(object):
 
         if self.args.fp16:
             if self.cuda and torch.cuda.get_device_capability(0)[0] < 7:
-                print(
-                    "| WARNING: your device does NOT support faster training with --fp16, "
+                logger.info(
+                    "NOTE: your device does NOT support faster training with --fp16, "
                     "please switch to FP32 which is likely to be faster"
                 )
             if self.args.memory_efficient_fp16:
@@ -125,7 +129,7 @@ class Trainer(object):
                 self._optimizer = optim.FP16Optimizer.build_optimizer(self.args, params)
         else:
             if self.cuda and torch.cuda.get_device_capability(0)[0] >= 7:
-                print("| NOTICE: your device may support faster training with --fp16")
+                logger.info("NOTE: your device may support faster training with --fp16")
             self._optimizer = optim.build_optimizer(self.args, params)
 
         if self.args.use_bmuf:
@@ -207,8 +211,8 @@ class Trainer(object):
 
         if extra_state is not None:
             epoch = extra_state["train_iterator"]["epoch"]
-            print(
-                "| loaded checkpoint {} (epoch {} @ {} updates)".format(
+            logger.info(
+                "loaded checkpoint {} (epoch {} @ {} updates)".format(
                     filename, epoch, self.get_num_updates()
                 )
             )
@@ -223,7 +227,7 @@ class Trainer(object):
                     if isinstance(meter, TimeMeter):
                         meter.reset()
         else:
-            print("| no existing checkpoint found {}".format(filename))
+            logger.info("no existing checkpoint found {}".format(filename))
 
         return extra_state
 
@@ -237,7 +241,7 @@ class Trainer(object):
     ):
         """Return an EpochBatchIterator over the training set for a given epoch."""
         if load_dataset:
-            print("| loading train data for epoch {}".format(epoch))
+            logger.info("loading train data for epoch {}".format(epoch))
             self.task.load_dataset(
                 self.args.train_subset,
                 epoch=epoch,
@@ -309,18 +313,23 @@ class Trainer(object):
                     loss, sample_size_i, logging_output = self.task.train_step(
                         sample, self.model, self.criterion, self.optimizer, ignore_grad
                     )
+                    del loss
 
                 if not ignore_grad:
                     logging_outputs.append(logging_output)
                     sample_size += sample_size_i
+
+                # emptying the CUDA cache after the first step can
+                # reduce the chance of OOM
+                if self.cuda and self.get_num_updates() == 0:
+                    torch.cuda.empty_cache()
             except RuntimeError as e:
                 if "out of memory" in str(e):
                     self._log_oom(e)
                     if raise_oom:
                         raise e
-                    print(
-                        "| WARNING: attempting to recover from OOM in forward/backward pass",
-                        file=sys.stderr,
+                    logger.warning(
+                        "attempting to recover from OOM in forward/backward pass"
                     )
                     ooms += 1
                     self.zero_grad()
@@ -341,23 +350,17 @@ class Trainer(object):
 
         metrics.log_scalar("oom", ooms, len(samples), priority=600, round=3)
         if ooms == self.args.distributed_world_size * len(samples):
-            print("| WARNING: OOM in all workers, skipping update")
+            logger.warning("OOM in all workers, skipping update")
             self.zero_grad()
             return None
 
         try:
             # normalize grads by sample size
-            if not self.args.use_bmuf:
-                # multiply gradients by (# GPUs / sample_size) since DDP
-                # already normalizes by the number of GPUs. Thus we get
-                # (sum_of_gradients / sample_size).
-                self.optimizer.multiply_grads(self.args.distributed_world_size / sample_size)
-            elif sample_size > 0:
-                # during non-sync gradients are divided by
-                # sample_size whereas during sync (while calculating
-                # global model): sync accumulate gradients and
-                # divided by #GPUs and now multiply by #GPUs/#sample_size
+            if sample_size > 0:
                 if self._sync_stats():
+                    # multiply gradients by (# GPUs / sample_size) since DDP
+                    # already normalizes by the number of GPUs. Thus we get
+                    # (sum_of_gradients / sample_size).
                     self.optimizer.multiply_grads(self.args.distributed_world_size / sample_size)
                 else:
                     self.optimizer.multiply_grads(1 / sample_size)
@@ -374,12 +377,12 @@ class Trainer(object):
             self.set_num_updates(self.get_num_updates() + 1)
 
             # task specific update per step
-            self.task.update_step(self._num_updates)
+            self.task.update_step(self.get_num_updates())
 
             # log stats
             logging_output = self._reduce_and_log_stats(logging_outputs, sample_size)
             metrics.log_speed("ups", 1., priority=100, round=2)
-            metrics.log_scalar("gnorm", grad_norm, priority=400, round=3)
+            metrics.log_scalar("gnorm", utils.item(grad_norm), priority=400, round=3)
             metrics.log_scalar(
                 "clip",
                 100 if grad_norm > self.args.clip_norm > 0 else 0,
@@ -399,19 +402,18 @@ class Trainer(object):
             ):
                 torch.cuda.empty_cache()
         except OverflowError as e:
-            print("| WARNING: overflow detected, " + str(e))
+            logger.info("NOTE: overflow detected, " + str(e))
             self.zero_grad()
             logging_output = None
         except RuntimeError as e:
             if "out of memory" in str(e):
                 self._log_oom(e)
-                print("| ERROR: OOM during optimization, irrecoverable")
+                logger.error("OOM during optimization, irrecoverable")
             raise e
 
         if self.args.fp16:
             metrics.log_scalar("loss_scale", self.optimizer.scaler.loss_scale, priority=700, round=0)
 
-        self.clear_buffered_stats()
         metrics.log_stop_time("train_wall")
 
         return logging_output
@@ -438,8 +440,8 @@ class Trainer(object):
                 if "out of memory" in str(e):
                     self._log_oom(e)
                     if not raise_oom:
-                        print(
-                            "| WARNING: ran out of memory in validation step, retrying batch"
+                        logger.warning(
+                            "ran out of memory in validation step, retrying batch"
                         )
                         for p in self.model.parameters():
                             if p.grad is not None:
@@ -481,9 +483,6 @@ class Trainer(object):
 
     def zero_grad(self):
         self.optimizer.zero_grad()
-
-    def clear_buffered_stats(self):
-        self._all_reduce_list = [0.0] * 6
 
     def lr_step(self, epoch, val_loss=None):
         """Adjust the learning rate based on the validation loss."""
@@ -534,6 +533,9 @@ class Trainer(object):
             # support for legacy train.py, which assumed this meter is
             # always initialized
             m = metrics.get_meter("default", "wall")
+            return m or meters.TimeMeter()
+        elif name == "wps":
+            m = metrics.get_meter("train", "wps")
             return m or meters.TimeMeter()
         elif name in {"valid_loss", "valid_nll_loss"}:
             # support for legacy train.py, which assumed these meters
@@ -593,15 +595,11 @@ class Trainer(object):
         )
 
     def _log_oom(self, exc):
-        msg = "| OOM: Ran out of memory with exception: {}".format(exc)
-        # TODO: print should really go to logger, this print goes
-        # to stderr, which is buffered, which in many cases is not
-        # printed out if another exception happens.
-        # NB(jerry): added a flush to mitigate this
-        print(msg, file=sys.stderr)
+        msg = "OOM: Ran out of memory with exception: {}".format(exc)
+        logger.warning(msg)
         if torch.cuda.is_available() and hasattr(torch.cuda, "memory_summary"):
             for device_idx in range(torch.cuda.device_count()):
-                print(torch.cuda.memory_summary(device=device_idx), file=sys.stderr)
+                logger.warning(torch.cuda.memory_summary(device=device_idx))
         sys.stderr.flush()
 
     def _aggregate_logging_outputs(
@@ -637,7 +635,8 @@ class Trainer(object):
     def _fast_stat_sync_sum(
         self,
         logging_outputs: List[Dict[str, Any]],
-        *extra_stats_to_sum
+        *extra_stats_to_sum,
+        min_buffer_size: int = 50,
     ):
         """
         Sync logging outputs across workers. fast_stat_sync_sum is
@@ -647,35 +646,32 @@ class Trainer(object):
         num_extra = len(extra_stats_to_sum)
         if len(logging_outputs) > 0:
             sorted_keys = sorted(logging_outputs[0].keys())
-            stats = list(extra_stats_to_sum) + [
+            stats = [0.] + list(extra_stats_to_sum) + [
                 sum(log.get(k, 0) for log in logging_outputs)
                 for k in sorted_keys
             ]
+            stats = stats + [0.]*(min_buffer_size - len(stats))
             buf = torch.cuda.DoubleTensor(stats)
-
-            # When the number of batches is not evenly divisible by the
-            # number of GPUs, logging_outputs will be empty for some
-            # workers in the last iteration. But we still need to know
-            # the keys and buffer size, so we cache the state in case it
-            # needs to be reused by this worker later.
-            self._fss_buf = buf
-            self._fss_sorted_keys = sorted_keys
-        elif self._fss_buf is not None:
-            buf = self._fss_buf
-            buf.zero_()
-            buf[:num_extra] = torch.cuda.DoubleTensor(extra_stats_to_sum)
-            sorted_keys = self._fss_sorted_keys
         else:
-            raise RuntimeError(
-                'fast_stat_sync failed, perhaps (# GPUs) > (# batches)?'
-            )
+            buf = torch.zeros(min_buffer_size, dtype=torch.double, device='cuda')
+            buf[0] = 1.  # flag to indicate we should fallback to _all_gather_list_sync
 
+        # stats buffer is organized like:
+        # 0: flag to indicate whether fast-stat-sync should be disabled
+        # 1-i: extra_stats_to_sum
+        # i-j: values from logging_outputs (sorted by key)
+        # j-min_buffer_size: padded with 0s
         distributed_utils.all_reduce(buf)
 
         buf = buf.tolist()
-        extra_stats_to_sum, stats = buf[:num_extra], buf[num_extra:]
-        stats = [{k: stats[i] for i, k in enumerate(sorted_keys)}]
-        return [stats] + extra_stats_to_sum
+        fallback = buf[0]
+        if fallback > 0.:
+            # fallback to _all_gather_list_sync
+            return self._all_gather_list_sync(logging_outputs, *extra_stats_to_sum)
+        else:
+            extra_stats_to_sum, stats = buf[1:num_extra + 1], buf[num_extra + 1:]
+            stats = [{k: stats[i] for i, k in enumerate(sorted_keys)}]
+            return [stats] + extra_stats_to_sum
 
     def _check_grad_norms(self, grad_norm):
         """Check that grad norms are consistent across workers."""
