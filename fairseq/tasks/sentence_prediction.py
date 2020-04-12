@@ -46,7 +46,7 @@ class SentencePredictionTask(FairseqTask):
         parser.add_argument('data', metavar='FILE',
                             help='file prefix for data')
         parser.add_argument('--num-classes', type=int, default=-1,
-                            help='number of classes')
+                            help='number of classes or regression targets')
         parser.add_argument('--init-token', type=int, default=None,
                             help='add token at the beginning of each batch item')
         parser.add_argument('--separator-token', type=int, default=None,
@@ -117,7 +117,7 @@ class SentencePredictionTask(FairseqTask):
 
             dataset = data_utils.load_indexed_dataset(
                 split_path,
-                self.source_dictionary,
+                dictionary,
                 self.args.dataset_impl,
                 combine=combine,
             )
@@ -167,23 +167,28 @@ class SentencePredictionTask(FairseqTask):
             )
 
         if not self.args.regression_target:
-            label_dataset = make_dataset('label', self.target_dictionary)
+            label_dataset = make_dataset('label', self.label_dictionary)
             if label_dataset is not None:
                 dataset.update(
                     target=OffsetTokensDataset(
                         StripTokenDataset(
                             label_dataset,
-                            id_to_strip=self.target_dictionary.eos(),
+                            id_to_strip=self.label_dictionary.eos(),
                         ),
-                        offset=-self.target_dictionary.nspecial,
+                        offset=-self.label_dictionary.nspecial,
                     )
                 )
         else:
             label_path = "{0}.label".format(get_path('label', split))
             if os.path.exists(label_path):
+                def parse_regression_target(i, line):
+                    values = line.split()
+                    assert len(values) == self.args.num_classes, \
+                        f'expected num_classes={self.args.num_classes} regression target values on line {i}, found: "{line}"'
+                    return [float(x) for x in values]
                 dataset.update(
                     target=RawLabelDataset([
-                        float(x.strip()) for x in open(label_path).readlines()
+                        parse_regression_target(i, line.strip()) for i, line in enumerate(open(label_path).readlines())
                     ])
                 )
 

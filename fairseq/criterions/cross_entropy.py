@@ -14,8 +14,9 @@ from fairseq.criterions import FairseqCriterion, register_criterion
 @register_criterion('cross_entropy')
 class CrossEntropyCriterion(FairseqCriterion):
 
-    def __init__(self, args, task):
-        super().__init__(args, task)
+    def __init__(self, task, sentence_avg):
+        super().__init__(task)
+        self.sentence_avg = sentence_avg
 
     def forward(self, model, sample, reduce=True):
         """Compute the loss for the given sample.
@@ -27,9 +28,9 @@ class CrossEntropyCriterion(FairseqCriterion):
         """
         net_output = model(**sample['net_input'])
         loss, _ = self.compute_loss(model, net_output, sample, reduce=reduce)
-        sample_size = sample['target'].size(0) if self.args.sentence_avg else sample['ntokens']
+        sample_size = sample['target'].size(0) if self.sentence_avg else sample['ntokens']
         logging_output = {
-            'loss': utils.item(loss.data) if reduce else loss.data,
+            'loss': loss.data,
             'ntokens': sample['ntokens'],
             'nsentences': sample['target'].size(0),
             'sample_size': sample_size,
@@ -58,9 +59,9 @@ class CrossEntropyCriterion(FairseqCriterion):
         metrics.log_scalar('loss', loss_sum / sample_size / math.log(2), sample_size, round=3)
         if sample_size != ntokens:
             metrics.log_scalar('nll_loss', loss_sum / ntokens / math.log(2), ntokens, round=3)
-            metrics.log_derived('ppl', lambda meters: round(2**meters['nll_loss'].avg, 3))
+            metrics.log_derived('ppl', lambda meters: utils.get_perplexity(meters['nll_loss'].avg))
         else:
-            metrics.log_derived('ppl', lambda meters: round(2**meters['loss'].avg, 3))
+            metrics.log_derived('ppl', lambda meters: utils.get_perplexity(meters['loss'].avg))
 
     @staticmethod
     def logging_outputs_can_be_summed() -> bool:

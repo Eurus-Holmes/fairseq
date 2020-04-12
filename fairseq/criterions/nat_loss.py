@@ -15,17 +15,21 @@ from fairseq.criterions import FairseqCriterion, register_criterion
 
 @register_criterion("nat_loss")
 class LabelSmoothedDualImitationCriterion(FairseqCriterion):
+
+    def __init__(self, task, label_smoothing):
+        super().__init__(task)
+        self.label_smoothing = label_smoothing
+
     @staticmethod
     def add_args(parser):
         """Add criterion-specific arguments to the parser."""
-        # fmt: off
         parser.add_argument(
             '--label-smoothing',
             default=0.,
             type=float,
             metavar='D',
-            help='epsilon for label smoothing, 0 means no label smoothing')
-        # fmt: on
+            help='epsilon for label smoothing, 0 means no label smoothing',
+        )
 
     def _compute_loss(
         self, outputs, targets, masks=None, label_smoothing=0.0, name="loss", factor=1.0
@@ -122,8 +126,8 @@ class LabelSmoothedDualImitationCriterion(FairseqCriterion):
         # here sample_size is just used for logging
         sample_size = 1
         logging_output = {
-            "loss": utils.item(loss.data) if reduce else loss.data,
-            "nll_loss": utils.item(nll_loss.data) if reduce else nll_loss.data,
+            "loss": loss.data,
+            "nll_loss": nll_loss.data,
             "ntokens": ntokens,
             "nsentences": nsentences,
             "sample_size": sample_size,
@@ -141,13 +145,13 @@ class LabelSmoothedDualImitationCriterion(FairseqCriterion):
     @staticmethod
     def reduce_metrics(logging_outputs) -> None:
         """Aggregate logging outputs from data parallel training."""
-        sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
-        loss = sum(log.get("loss", 0) for log in logging_outputs)
-        nll_loss = sum(log.get("nll_loss", 0) for log in logging_outputs)
+        sample_size = utils.item(sum(log.get("sample_size", 0) for log in logging_outputs))
+        loss = utils.item(sum(log.get("loss", 0) for log in logging_outputs))
+        nll_loss = utils.item(sum(log.get("nll_loss", 0) for log in logging_outputs))
 
         metrics.log_scalar('loss', loss / sample_size / math.log(2), sample_size, round=3)
         metrics.log_scalar('nll_loss', nll_loss / sample_size / math.log(2), sample_size, round=3)
-        metrics.log_derived('ppl', lambda meters: round(2**meters['nll_loss'].avg, 3))
+        metrics.log_derived('ppl', lambda meters: utils.get_perplexity(meters['loss'].avg))
 
         for key in logging_outputs[0]:
             if key[-5:] == "-loss":

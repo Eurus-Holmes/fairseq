@@ -45,6 +45,7 @@ def get_interactive_generation_parser(default_task="translation"):
 def get_eval_lm_parser(default_task="language_modeling"):
     parser = get_parser("Evaluate Language Model", default_task)
     add_dataset_args(parser, gen=True)
+    add_distributed_training_args(parser)
     add_eval_lm_args(parser)
     return parser
 
@@ -112,6 +113,13 @@ def parse_args_and_arch(
         )
 
     from fairseq.models import ARCH_MODEL_REGISTRY, ARCH_CONFIG_REGISTRY
+
+    # Before creating the true parser, we need to import optional user module
+    # in order to eagerly import custom tasks, optimizers, architectures, etc.
+    usr_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    usr_parser.add_argument("--user-dir", default=None)
+    usr_args, _ = usr_parser.parse_known_args(input_args)
+    utils.import_user_module(usr_args)
 
     if modify_parser is not None:
         modify_parser(parser)
@@ -191,7 +199,7 @@ def get_parser(desc, default_task="translation"):
     parser = argparse.ArgumentParser(allow_abbrev=False)
     # fmt: off
     parser.add_argument('--no-progress-bar', action='store_true', help='disable progress bar')
-    parser.add_argument('--log-interval', type=int, default=1000, metavar='N',
+    parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                         help='log progress every N batches (when progress bar is disabled)')
     parser.add_argument('--log-format', default=None, help='log format to use',
                         choices=['json', 'none', 'simple', 'tqdm'])
@@ -222,6 +230,12 @@ def get_parser(desc, default_task="translation"):
                         help='how often to clear the PyTorch CUDA cache (0 to disable)')
     parser.add_argument('--all-gather-list-size', default=16384, type=int,
                         help='number of bytes reserved for gathering stats from workers')
+
+    parser.add_argument('--model-parallel-size', type=int, metavar='N',
+                        default=1,
+                        help='total number of GPUs to parallelize model over')
+    parser.add_argument('--checkpoint-suffix', default='',
+                        help='Suffix to add to the checkpoint file name')
 
     from fairseq.registry import REGISTRIES
     for registry_name, REGISTRY in REGISTRIES.items():

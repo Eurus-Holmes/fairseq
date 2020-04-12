@@ -8,6 +8,26 @@ from collections import OrderedDict
 import time
 from typing import Dict, Optional
 
+try:
+    import torch
+
+    def type_as(a, b):
+        if torch.is_tensor(a) and torch.is_tensor(b):
+            return a.to(b)
+        else:
+            return a
+except ImportError:
+    torch = None
+
+    def type_as(a, b):
+        return a
+
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
 
 class Meter(object):
     """Base class for Meters."""
@@ -33,6 +53,10 @@ class Meter(object):
 def safe_round(number, ndigits):
     if hasattr(number, '__round__'):
         return round(number, ndigits)
+    elif torch is not None and torch.is_tensor(number) and number.numel() == 1:
+        return safe_round(number.item(), ndigits)
+    elif np is not None and np.ndim(number) == 0 and hasattr(number, 'item'):
+        return safe_round(number.item(), ndigits)
     else:
         return number
 
@@ -53,8 +77,8 @@ class AverageMeter(Meter):
         if val is not None:
             self.val = val
             if n > 0:
-                self.sum += val * n
-                self.count += n
+                self.sum = type_as(self.sum, val) + (val * n)
+                self.count = type_as(self.count, n) + n
 
     def state_dict(self):
         return {
@@ -85,7 +109,12 @@ class AverageMeter(Meter):
 class TimeMeter(Meter):
     """Computes the average occurrence of some event per second"""
 
-    def __init__(self, init: int = 0, n: int = 0, round: Optional[int] = None):
+    def __init__(
+        self,
+        init: int = 0,
+        n: int = 0,
+        round: Optional[int] = None,
+    ):
         self.round = round
         self.reset(init, n)
 
@@ -93,9 +122,11 @@ class TimeMeter(Meter):
         self.init = init
         self.start = time.perf_counter()
         self.n = n
+        self.i = 0
 
     def update(self, val=1):
-        self.n += val
+        self.n = type_as(self.n, val) + val
+        self.i += 1
 
     def state_dict(self):
         return {
@@ -143,8 +174,8 @@ class StopwatchMeter(Meter):
     def stop(self, n=1):
         if self.start_time is not None:
             delta = time.perf_counter() - self.start_time
-            self.sum += delta
-            self.n += n
+            self.sum = self.sum + delta
+            self.n = type_as(self.n, n) + n
 
     def reset(self):
         self.sum = 0  # cumulative time during which stopwatch was active

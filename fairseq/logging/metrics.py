@@ -27,10 +27,19 @@ _active_aggregators = OrderedDict()
 _active_aggregators_cnt = defaultdict(lambda: 0)
 
 
-# The "default" aggregator observes all logged values.
-_aggregators["default"] = MetersDict()
-_active_aggregators["default"] = _aggregators["default"]
-_active_aggregators_cnt["default"] = 1
+def reset() -> None:
+    """Reset all metrics aggregators."""
+    _aggregators.clear()
+    _active_aggregators.clear()
+    _active_aggregators_cnt.clear()
+
+    # The "default" aggregator observes all logged values.
+    _aggregators["default"] = MetersDict()
+    _active_aggregators["default"] = _aggregators["default"]
+    _active_aggregators_cnt["default"] = 1
+
+
+reset()
 
 
 @contextlib.contextmanager
@@ -137,7 +146,12 @@ def log_derived(key: str, fn: Callable[[MetersDict], float], priority: int = 20)
             agg.add_meter(key, MetersDict._DerivedMeter(fn), priority)
 
 
-def log_speed(key: str, value: float, priority: int = 30, round: Optional[int] = None):
+def log_speed(
+    key: str,
+    value: float,
+    priority: int = 30,
+    round: Optional[int] = None,
+):
     """Log the rate of some quantity per second.
 
     Args:
